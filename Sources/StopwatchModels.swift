@@ -1,9 +1,12 @@
 ﻿import Foundation
 
 enum LapKind: String, CaseIterable, Identifiable {
-    case lap = "Lap"
-    case split = "Split"
+    case lap = "TRX"
+    case split = "TRC20"
     var id: String { rawValue }
+
+    /// 当前仅支持 TRX 与 USDT 转账，查询类型与转账资产名称分别展示。
+    var transferTitle: String { self == .lap ? "TRX" : "USDT" }
 }
 
 struct LapRecord: Identifiable, Hashable {

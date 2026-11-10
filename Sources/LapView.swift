@@ -1,239 +1,257 @@
-﻿import SwiftUI
+import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
-struct LapView: View {
+/// 解锁后的 TRON 工作区；查询与编辑状态由主线程状态对象统一持久化。
+struct TronManagerView: View {
     @StateObject private var state = StopwatchState()
     @Environment(\.scenePhase) private var scenePhase
-    @State private var showingDetails = false
-    @State private var showingSplit = false
-    @State private var showingSettings = false
-    @State private var resultText = UserDefaults.standard.string(forKey: "stopwatch.resultText") ?? ""
-    // 记录上一次由查询自动生成的文本，用于区分系统刷新和用户手动编辑。
-    @State private var generatedResultText = ""
+    @State private var activeSheet: ManagerSheet?
+    @State private var isExporting = false
+    @State private var exportText = ""
+    @State private var actionMessage: String?
+    @State private var showingRestoreConfirmation = false
 
     var body: some View {
-        navigationContent
-            .toolbar {
-                LapToolbar(
-                    showingDetails: $showingDetails,
-                    showingSplit: $showingSplit,
-                    showingSettings: $showingSettings
-                )
+        NavigationStack {
+            exportingContent
+                .navigationTitle("TRON 管理器")
+                .navigationBarTitleDisplayMode(.inline)
+        }
+        .sheet(item: $activeSheet) { sheet in
+            sheetContent(sheet)
+        }
+    }
+
+    // 用独立表达式隔离导出、生命周期与布局，减少 SwiftUI 类型检查的复杂度。
+    private var exportingContent: some View {
+        observedContent
+            .fileExporter(isPresented: $isExporting,
+                          document: TransactionTextDocument(text: exportText),
+                          contentType: .plainText,
+                          defaultFilename: "TRON-交易记录") { result in
+                switch result {
+                case .success:
+                    actionMessage = "查询结果已导出为 UTF-8 文本。"
+                case .failure(let error):
+                    actionMessage = "导出失败：\(TronErrorMessage.describe(error))"
+                }
             }
-            .sheet(isPresented: $showingDetails) {
-                detailsSheet
-            }
-            .sheet(isPresented: $showingSplit) {
-                SplitView()
-            }
-            .sheet(isPresented: $showingSettings) {
-                TimeSettingsView()
+            .confirmationDialog("用当前交易记录替换编辑内容？", isPresented: $showingRestoreConfirmation,
+                                titleVisibility: .visible) {
+                Button("恢复查询结果", role: .destructive) { state.restoreQueryOutput() }
+                Button("取消", role: .cancel) { }
             }
     }
 
-    private var navigationContent: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    tagSection
-                    metricsSection
-                    controlSection
-                    resultEditor
-                    recordSection
-                }
-                .padding()
-            }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("Lap Timer")
-            .onChange(of: resultText) { _, value in
-                UserDefaults.standard.set(value, forKey: "stopwatch.resultText")
-            }
-            .onChange(of: state.lapTag) { _, _ in
-                // 标签变更后旧查询结果不再属于当前账户，清除展示文本并允许新结果首次填充。
-                clearGeneratedResult()
-            }
-            .onChange(of: state.kind) { _, _ in
-                // 模式切换后记录语义改变，避免把上一模式的文本带到当前列表。
-                clearGeneratedResult()
-            }
+    private var observedContent: some View {
+        pageContent
+            .onAppear { state.setSceneActive(scenePhase == .active) }
+            .onDisappear { state.setSceneActive(false) }
             .onChange(of: scenePhase) { _, phase in
                 state.setSceneActive(phase == .active)
             }
-            .onChange(of: state.records) { _, records in
-                handleRecordsChange(records)
+    }
+
+    private var pageContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                addressSection
+                balanceSection
+                queryControls
+                actionGrid
+                statusSection
+                resultEditor
+                recordSection
             }
+            .padding()
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    @ViewBuilder
+    private func sheetContent(_ sheet: ManagerSheet) -> some View {
+        switch sheet {
+        case .permissions:
+            LapDetailsView(tag: state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines))
+        case .transfer:
+            SplitView()
+        case .conversion:
+            TimeSettingsView()
         }
     }
 
-    private var detailsSheet: some View {
-        LapDetailsView(tag: state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
-    /// 清理当前标签或模式失效后的自动结果，允许下一次查询重新填充。
-    private func clearGeneratedResult() {
-        resultText = ""
-        generatedResultText = ""
-    }
-
-    /// 根据记录更新结果编辑器，同时保留用户已经手动修改的内容。
-    private func handleRecordsChange(_ records: [LapRecord]) {
-        // 记录清空时只清除仍等于自动生成文本的内容，保留用户手动编辑。
-        if records.isEmpty {
-            if resultText == generatedResultText {
-                clearGeneratedResult()
-            }
-            return
-        }
-
-        let generated = records.map { record in
-            "Lap: \(record.id)\nFrom: \(record.from)\nTo: \(record.to)\nValue: \(decimalText(record.amount)) \(record.label)\nTime: \(record.timeText)"
-        }.joined(separator: "\n\n")
-        // 只有编辑器为空或仍是上一次自动生成值时才更新，避免覆盖用户编辑。
-        guard resultText == generatedResultText || (resultText.isEmpty && generatedResultText.isEmpty) else { return }
-        resultText = generated
-        generatedResultText = generated
-    }
-
-    private var tagSection: some View {
+    private var addressSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Lap Tag").font(.headline)
-            TextField("Enter a tag", text: $state.lapTag)
+            Text("查询地址").font(.headline)
+            TextField("输入 T 开头的 TRON 地址", text: $state.lapTag)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
+                .submitLabel(.search)
                 .onSubmit { state.start() }
-            if !state.lapTag.isEmpty {
-                Label("Saved locally for the next session", systemImage: "checkmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text("地址和查询结果自动保存，下次打开可继续编辑。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
-    private var metricsSection: some View {
+    private var balanceSection: some View {
         GroupBox {
             if let metrics = state.metrics {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    MetricCell(title: "Lap", value: decimalText(metrics.primary))
-                    MetricCell(title: "Split", value: decimalText(metrics.secondary))
-                    MetricCell(title: "Focus", value: resourceText(used: metrics.focusUsed, limit: metrics.focusLimit))
-                    MetricCell(title: "Range", value: resourceText(used: metrics.rangeUsed, limit: metrics.rangeLimit))
-                }
+                balanceGrid(metrics)
             } else {
-                HStack {
-                    Image(systemName: "chart.bar.xaxis")
-                    Text("Start a lap to show timing metrics")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Refresh") { state.refreshMetrics() }
-                        .buttonStyle(.bordered)
-                }
+                Text("查询地址后显示 TRX、USDT 余额及可用资源。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            Button("刷新余额") { state.refreshMetrics() }
+                .buttonStyle(.bordered)
+                .disabled(state.isLoading || state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } label: {
-            Label("Stopwatch Metrics", systemImage: "gauge.with.dots.needle.67percent")
+            Label("账户余额与资源", systemImage: "chart.bar.xaxis")
         }
     }
 
-    private var controlSection: some View {
-        VStack(spacing: 12) {
-            Picker("Mode", selection: $state.kind) {
-                ForEach(LapKind.allCases) { kind in Text(kind.rawValue).tag(kind) }
-            }
-            .pickerStyle(.segmented)
-
-            HStack {
-                Button { state.start() } label: { Label("Start", systemImage: "play.fill") }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(state.isLoading)
-                Button { state.start(reset: false) } label: { Label("Next Lap", systemImage: "chevron.down") }
-                    .buttonStyle(.bordered)
-                    .disabled(state.isLoading || state.cursor == nil)
-                Spacer()
-                Toggle("Auto Lap", isOn: $state.autoLap)
-                    .toggleStyle(.switch)
-                    .font(.subheadline)
-            }
-            if state.isLoading {
-                ProgressView("Updating lap…")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if let message = state.message {
-                Text(message).font(.footnote).foregroundStyle(.secondary)
-            }
+    private func balanceGrid(_ metrics: StopwatchMetrics) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            MetricCell(title: "TRX", value: decimalText(metrics.primary))
+            MetricCell(title: "USDT", value: decimalText(metrics.secondary))
+            MetricCell(title: "能量（可用 / 总额）", value: resourceText(used: metrics.focusUsed, limit: metrics.focusLimit))
+            MetricCell(title: "带宽（可用 / 总额）", value: resourceText(used: metrics.rangeUsed, limit: metrics.rangeLimit))
         }
+    }
+
+    private var queryControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Button("查询 TRX") { state.query(.lap) }
+                Button("查询 TRC20") { state.query(.split) }
+                Button("下一页") { state.start(reset: false) }
+                    .disabled(state.cursor == nil)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(state.isLoading)
+            Text("当前：\(state.kind.rawValue) · TRC20 查询包含 USDT 及其他代币")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Toggle("监控新交易", isOn: $state.autoLap)
+            Text("前台每 10 秒刷新；手动编辑的查询结果不会被监控覆盖。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // 功能按钮直接置于页面，避免导航栏工具项在容器中不显示而失去入口。
+    private var actionGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            Button { activeSheet = .permissions } label: {
+                Label("账户权限", systemImage: "lock.shield")
+            }
+            Button { activeSheet = .transfer } label: {
+                Label("转账", systemImage: "arrow.up.right")
+            }
+            Button { activeSheet = .conversion } label: {
+                Label("地址转换", systemImage: "key")
+            }
+            Button(action: copyOutput) { Label("复制结果", systemImage: "doc.on.doc") }
+                .disabled(state.resultText.isEmpty)
+            Button(action: exportOutput) { Label("导出 TXT", systemImage: "square.and.arrow.up") }
+                .disabled(state.resultText.isEmpty)
+            ShareLink(item: state.resultText) { Label("分享", systemImage: "square.and.arrow.up.on.square") }
+                .disabled(state.resultText.isEmpty)
+        }
+        .buttonStyle(.bordered)
+        .font(.subheadline)
+    }
+
+    private var statusSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if state.isLoading { ProgressView("正在查询链上数据…") }
+            if let message = state.message { Text(message).foregroundStyle(.secondary) }
+            if let message = state.monitorMessage { Text(message).foregroundStyle(.orange) }
+            if let actionMessage { Text(actionMessage).foregroundStyle(.secondary) }
+        }
+        .font(.footnote)
     }
 
     private var resultEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Result Text").font(.headline)
+                Text("查询结果（可编辑）").font(.headline)
                 Spacer()
-                Button {
-                    UIPasteboard.general.string = resultText
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                }
-                .disabled(resultText.isEmpty)
+                Button("恢复查询结果") { showingRestoreConfirmation = true }
+                    .font(.caption)
+                    .disabled(state.records.isEmpty)
             }
-            TextEditor(text: $resultText)
+            TextEditor(text: $state.resultText)
                 .font(.system(.footnote, design: .monospaced))
-                .frame(minHeight: 150, maxHeight: 280)
+                .frame(minHeight: 220, maxHeight: 380)
                 .padding(6)
                 .scrollContentBackground(.hidden)
                 .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(alignment: .topLeading) {
-                    if resultText.isEmpty {
-                        Text("Query results appear here. Select, edit, copy, or share any text.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 14)
-                            .allowsHitTesting(false)
-                    }
-                }
+            Text("支持选择、修改、复制、粘贴；导出与分享以编辑框中的文本为准。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
     private var recordSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Lap History").font(.headline)
-                Spacer()
-                if !state.records.isEmpty {
-                    ShareLink(item: resultText) { Image(systemName: "square.and.arrow.up") }
-                    Button { UIPasteboard.general.string = resultText } label: { Image(systemName: "doc.on.doc") }
-                }
-            }
+            Text("链上交易记录").font(.headline)
             if state.records.isEmpty {
-                ContentUnavailableView("No Laps", systemImage: "tray", description: Text("Enter a lap tag and press Start"))
+                ContentUnavailableView("暂无交易记录", systemImage: "tray",
+                                       description: Text("输入 TRON 地址后，点击查询 TRX 或查询 TRC20。"))
             } else {
-                ForEach(state.records) { record in
-                    LapCard(record: record, tag: state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines))
+                // 同一链上交易可能包含多个 TRC20 事件，不能仅用交易 ID 作为视图标识。
+                ForEach(Array(state.records.enumerated()), id: \.offset) { item in
+                    TransactionCard(record: item.element, number: item.offset + 1,
+                                    address: state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines))
                 }
             }
         }
+    }
+
+    private func copyOutput() {
+        UIPasteboard.general.string = state.resultText
+        actionMessage = "已复制编辑框中的查询结果。"
+    }
+
+    private func exportOutput() {
+        // 固定导出快照，文件选择器打开期间的刷新不会改变此次导出内容。
+        exportText = state.resultText
+        isExporting = true
     }
 
     private func resourceText(used: Int64, limit: Int64) -> String {
-        limit == 0 ? "\(used) / --" : "\(max(0, limit - used)) / \(limit)"
+        limit == 0 ? "0 / --" : "\(max(0, limit - used)) / \(limit)"
     }
 }
 
-private struct LapToolbar: ToolbarContent {
-    @Binding var showingDetails: Bool
-    @Binding var showingSplit: Bool
-    @Binding var showingSettings: Bool
+private enum ManagerSheet: String, Identifiable {
+    case permissions, transfer, conversion
+    var id: String { rawValue }
+}
 
-    var body: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button { showingDetails = true } label: { Label("Lap Details", systemImage: "list.bullet.rectangle") }
-                Button { showingSplit = true } label: { Label("Split", systemImage: "arrow.up.right") }
-                Button { showingSettings = true } label: { Label("Time Settings", systemImage: "gearshape") }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
+/// 导出编辑器内容为 UTF-8 文本，由系统文件选择器管理目标文件的写入权限。
+private struct TransactionTextDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    let text: String
+
+    init(text: String) { self.text = text }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents,
+              let text = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadInapplicableStringEncoding)
         }
+        self.text = text
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
     }
 }
 
@@ -242,7 +260,7 @@ private struct MetricCell: View {
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(value).font(.subheadline.weight(.semibold)).monospacedDigit()
         }
@@ -250,39 +268,35 @@ private struct MetricCell: View {
     }
 }
 
-private struct LapCard: View {
+private struct TransactionCard: View {
     let record: LapRecord
-    let tag: String
-    private var isIncoming: Bool { record.to.caseInsensitiveCompare(tag) == .orderedSame }
+    let number: Int
+    let address: String
+    private var isIncoming: Bool { record.to == address }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(isIncoming ? "IN" : "OUT")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(isIncoming ? Color.green : Color.red, in: Capsule())
-                Text("\(decimalText(record.amount)) \(record.label)")
-                    .font(.headline)
-                    .foregroundStyle(isIncoming ? .green : .red)
+                Text("#\(number) · \(isIncoming ? "收入" : "支出")")
                 Spacer()
-                Text(record.timeText).font(.caption).foregroundStyle(.secondary)
+                Text("\(isIncoming ? "+" : "−")\(decimalText(record.amount)) \(record.label)")
+                    .foregroundStyle(isIncoming ? Color.green : Color.red)
             }
-            Text("From  \(record.from)").font(.caption).lineLimit(1)
-            Text("To    \(record.to)").font(.caption).lineLimit(1)
-            Text("Lap   \(record.id)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            .font(.subheadline.weight(.semibold))
+            Text("交易 ID：\(record.id)").foregroundStyle(.purple)
+            Text("发送方：\(record.from)").foregroundStyle(.secondary)
+            Text("接收方：\(record.to)").foregroundStyle(.blue)
+            Text("时间：\(record.timeText)")
         }
+        .font(.caption)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 14))
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
 private func decimalText(_ value: Decimal) -> String {
-    let formatter = NumberFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.numberStyle = .decimal
-    formatter.maximumFractionDigits = 6
-    return formatter.string(from: value as NSDecimalNumber) ?? "0"
+    // 保留 Decimal 精度，不把小于百万分之一的 TRC20 转账显示为零。
+    NSDecimalNumber(decimal: value).stringValue
 }

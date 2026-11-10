@@ -6,14 +6,37 @@ enum StopwatchEngineError: LocalizedError {
     case invalidInput(String)
     case http(Int)
     case malformedResponse
+    case invalidResponse(String)
+    case nodeRejected(String)
 
     var errorDescription: String? {
         switch self {
-        case .invalidTag: return "Enter a valid lap tag."
+        case .invalidTag: return "请输入有效的 TRON 地址。"
         case let .invalidInput(message): return message
-        case let .http(code): return "The timing service returned HTTP \(code)."
-        case .malformedResponse: return "The timing service returned an unreadable response."
+        case let .http(code): return "TRON 节点返回 HTTP \(code)。"
+        case .malformedResponse: return "TRON 节点返回的数据无法解析。"
+        case let .invalidResponse(message): return "节点数据异常：\(message)"
+        case let .nodeRejected(message): return "节点返回：\(message)"
         }
+    }
+}
+
+/// 供界面统一显示中文错误；节点返回内容保留原文，私钥不参与错误格式化。
+enum TronErrorMessage {
+    static func describe(_ error: Error) -> String {
+        if let error = error as? StopwatchEngineError { return error.localizedDescription }
+        if let error = error as? TronSignerError { return error.localizedDescription }
+        if error is CancellationError { return "操作已取消。" }
+        if let error = error as? URLError {
+            switch error.code {
+            case .cancelled: return "操作已取消。"
+            case .timedOut: return "网络请求超时，请稍后重试。"
+            case .notConnectedToInternet, .networkConnectionLost: return "网络连接不可用，请检查网络。"
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed: return "无法连接 TRON 节点，请稍后重试。"
+            default: return "网络请求失败（\(error.errorCode)）：\(error.localizedDescription)"
+            }
+        }
+        return "操作失败：\(error.localizedDescription)"
     }
 }
 
@@ -34,11 +57,12 @@ final class StopwatchEngine {
             URLQueryItem(name: "order_by", value: "block_timestamp,desc"),
             URLQueryItem(name: "only_confirmed", value: "true")
         ]
-        if kind == .split { components.queryItems?.append(URLQueryItem(name: "contract_address", value: contractTag)) }
         if let cursor, !cursor.isEmpty { components.queryItems?.append(URLQueryItem(name: "fingerprint", value: cursor)) }
         let root = try await getJSON(components.url!)
         guard let rows = root["data"] as? [[String: Any]] else { throw StopwatchEngineError.malformedResponse }
-        let parsed = kind == .lap ? parseLap(rows) : parseSplit(rows)
+        let parsed: [LapRecord]
+        if kind == .lap { parsed = parseLap(rows) }
+        else { parsed = try parseSplit(rows) }
         let meta = root["meta"] as? [String: Any]
         return LapPage(records: parsed, cursor: meta?["fingerprint"] as? String)
     }
@@ -46,13 +70,17 @@ final class StopwatchEngine {
     func metrics(tag: String) async throws -> StopwatchMetrics {
         let normalized = try normalizedAddress(tag)
         let accountRoot = try await getJSON(baseURL.appendingPathComponent("v1/accounts/\(normalized)"))
-        let account = (accountRoot["data"] as? [[String: Any]])?.first ?? [:]
-        let primary = decimal(int64(account["balance"])) / Decimal(1_000_000)
+        guard let accounts = accountRoot["data"] as? [[String: Any]] else {
+            throw StopwatchEngineError.malformedResponse
+        }
+        // 未激活账户返回空数组；已激活账户的零值 protobuf 字段允许省略。
+        let account = accounts.first ?? [:]
+        let primary = decimal(try nonnegativeInt64(account["balance"])) / Decimal(1_000_000)
         let resource = try await postJSON(path: "wallet/getaccountresource", body: ["address": normalized, "visible": true])
-        let focusUsed = int64(resource["EnergyUsed"])
-        let focusLimit = int64(resource["EnergyLimit"])
-        let rangeUsed = int64(resource["freeNetUsed"]) + int64(resource["NetUsed"])
-        let rangeLimit = int64(resource["freeNetLimit"]) + int64(resource["NetLimit"])
+        let focusUsed = try nonnegativeInt64(resource["EnergyUsed"])
+        let focusLimit = try nonnegativeInt64(resource["EnergyLimit"])
+        let rangeUsed = try resourceTotal(resource["freeNetUsed"], resource["NetUsed"])
+        let rangeLimit = try resourceTotal(resource["freeNetLimit"], resource["NetLimit"])
         let secondary = try await fetchContractValue(tag: normalized)
         return StopwatchMetrics(primary: primary, secondary: secondary, focusUsed: focusUsed, focusLimit: focusLimit, rangeUsed: rangeUsed, rangeLimit: rangeLimit)
     }
@@ -73,11 +101,11 @@ final class StopwatchEngine {
         guard !privateKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !to.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw StopwatchEngineError.invalidInput("Complete the key, destination, and amount fields.")
+            throw StopwatchEngineError.invalidInput("请填写私钥、目标地址和金额。")
         }
         let destination = try normalizedAddress(to)
         guard let value = Decimal(string: amount.trimmingCharacters(in: .whitespacesAndNewlines)), value > 0 else {
-            throw StopwatchEngineError.invalidInput("Amount must be greater than zero.")
+            throw StopwatchEngineError.invalidInput("金额必须大于零。")
         }
         let key = privateKey.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -117,11 +145,18 @@ final class StopwatchEngine {
             "visible": false
         ])
         if let result = response["result"] as? Bool, result {
-            return LapResult(success: true, reference: (response["txid"] as? String) ?? built.txid, message: "Broadcast accepted.")
+            return LapResult(success: true, reference: (response["txid"] as? String) ?? built.txid, message: "节点已接受广播。")
         }
         let rawMessage = response["message"] as? String ?? ""
         let readable = decodeHexMessage(rawMessage) ?? rawMessage
-        let message = readable.isEmpty ? ((response["code"] as? String) ?? "The node rejected the broadcast.") : readable
+        let message: String
+        if !readable.isEmpty {
+            message = "节点返回：\(readable)"
+        } else if let code = response["code"] as? String, !code.isEmpty {
+            message = "节点返回：\(code)"
+        } else {
+            message = "节点拒绝广播。"
+        }
         return LapResult(success: false, reference: built.txid, message: message)
     }
 
@@ -144,9 +179,10 @@ final class StopwatchEngine {
 
     private func normalizedAddress(_ tag: String) throws -> String {
         let normalized = tag.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard normalized.count == 34, normalized.first == "T", addressHex(normalized) != nil else {
+        guard normalized.count == 34, normalized.first == "T" else {
             throw StopwatchEngineError.invalidTag
         }
+        _ = try TronSigner.decodeAddress(normalized)
         return normalized
     }
 
@@ -156,8 +192,7 @@ final class StopwatchEngine {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
         try check(response)
-        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw StopwatchEngineError.malformedResponse }
-        return object
+        return try decodedResponse(data)
     }
 
     private func postJSON(path: String, body: [String: Any]) async throws -> [String: Any] {
@@ -168,8 +203,22 @@ final class StopwatchEngine {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await session.data(for: request)
         try check(response)
-        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw StopwatchEngineError.malformedResponse }
-        return object
+        return try decodedResponse(data)
+    }
+
+    /// HTTP 成功不代表节点业务成功；明确报出节点错误，避免余额失败被解释成零。
+    private func decodedResponse(_ data: Data) throws -> [String: Any] {
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let root = object as? [String: Any] else {
+            throw StopwatchEngineError.malformedResponse
+        }
+        if let message = (root["Error"] as? String) ?? (root["error"] as? String), !message.isEmpty {
+            throw StopwatchEngineError.nodeRejected(message)
+        }
+        if let success = root["success"] as? Bool, !success {
+            throw StopwatchEngineError.nodeRejected((root["message"] as? String) ?? "请求未成功。")
+        }
+        return root
     }
 
     private func check(_ response: URLResponse) throws {
@@ -196,24 +245,44 @@ final class StopwatchEngine {
         }
     }
 
-    private func parseSplit(_ rows: [[String: Any]]) -> [LapRecord] {
-        rows.compactMap { row in
-            guard let from = row["from"] as? String, let to = row["to"] as? String else { return nil }
-            let info = row["token_info"] as? [String: Any] ?? [:]
-            let decimals = info["decimals"] == nil ? 6 : max(0, Int(int64(info["decimals"])))
-            guard let raw = decimalValue(row["value"]), raw >= 0 else { return nil }
-            let divisor = (0..<max(0, decimals)).reduce(Decimal(1)) { value, _ in value * 10 }
+    private func parseSplit(_ rows: [[String: Any]]) throws -> [LapRecord] {
+        try rows.map { row in
+            guard let from = row["from"] as? String, let to = row["to"] as? String,
+                  let info = row["token_info"] as? [String: Any], let precision = info["decimals"] else {
+                throw StopwatchEngineError.malformedResponse
+            }
+            // 全部 TRC20 代币共用查询接口，不能把缺失或异常精度猜测为 USDT 的 6 位。
+            let decimalsValue = try nonnegativeInt64(precision)
+            guard decimalsValue <= 30 else {
+                throw StopwatchEngineError.invalidResponse("TRC20 代币精度必须在 0...30 范围内。")
+            }
+            let decimals = Int(decimalsValue)
+            let rawText: String
+            if let value = row["value"] as? String { rawText = value }
+            else if let value = row["value"] as? NSNumber { rawText = value.stringValue }
+            else { throw StopwatchEngineError.malformedResponse }
+            let raw = try exactUnsignedDecimal(rawText, radix: 10, maxLength: 78)
+            let divisor = (0..<decimals).reduce(Decimal(1)) { value, _ in value * 10 }
             let timestamp = int64(row["block_timestamp"])
             return LapRecord(id: row["transaction_id"] as? String ?? UUID().uuidString, from: displayAddress(from), to: displayAddress(to), label: info["symbol"] as? String ?? "TRC20", amount: raw / divisor, amountBase: nil, timestamp: timestamp, timeText: formatDate(timestamp))
         }
     }
 
     private func fetchContractValue(tag: String) async throws -> Decimal {
-        guard let owner = addressHex(tag), let contract = addressHex(contractTag) else { return 0 }
+        guard let owner = addressHex(tag), let contract = addressHex(contractTag) else {
+            throw StopwatchEngineError.malformedResponse
+        }
         let parameter = String(repeating: "0", count: 24) + String(owner.dropFirst(2))
         let root = try await postJSON(path: "wallet/triggerconstantcontract", body: ["owner_address": owner, "contract_address": contract, "function_selector": "balanceOf(address)", "parameter": parameter, "visible": false])
-        guard let value = (root["constant_result"] as? [String])?.first else { return 0 }
-        return decimalFromHex(value) / Decimal(1_000_000)
+        if let result = root["result"] as? [String: Any], let success = result["result"] as? Bool, !success {
+            let message = (result["message"] as? String) ?? (result["code"] as? String) ?? "USDT 余额查询失败。"
+            throw StopwatchEngineError.nodeRejected(decodeHexMessage(message) ?? message)
+        }
+        guard let value = (root["constant_result"] as? [String])?.first, value.count == 64 else {
+            throw StopwatchEngineError.malformedResponse
+        }
+        let balance = try exactUnsignedDecimal(value, radix: 16, maxLength: 64)
+        return balance / Decimal(1_000_000)
     }
 
     private func parsePermission(_ raw: [String: Any]?) -> SplitPermission? {
@@ -221,14 +290,15 @@ final class StopwatchEngine {
         let keys = (raw["keys"] as? [[String: Any]] ?? []).map {
             SplitKey(address: displayAddress($0["address"] as? String ?? ""), weight: int64($0["weight"]))
         }
-        return SplitPermission(name: raw["permission_name"] as? String ?? "Permission", threshold: int64(raw["threshold"]), operations: raw["operations"] as? String ?? "", keys: keys)
+        return SplitPermission(name: raw["permission_name"] as? String ?? "权限", threshold: int64(raw["threshold"]), operations: raw["operations"] as? String ?? "", keys: keys)
     }
 
     private func formatDate(_ milliseconds: Int64) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1000))
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1000)) + " 北京时间"
     }
 
     private func int64(_ value: Any?) -> Int64 {
@@ -241,29 +311,49 @@ final class StopwatchEngine {
 
     private func decimal(_ value: Int64) -> Decimal { Decimal(string: String(value)) ?? 0 }
 
-    private func decimalValue(_ value: Any?) -> Decimal? {
-        switch value {
-        case let value as String: return Decimal(string: value)
-        case let value as NSNumber: return Decimal(string: value.stringValue)
-        default: return nil
+    private func nonnegativeInt64(_ value: Any?) throws -> Int64 {
+        guard let value else { return 0 }
+        let text: String
+        if let value = value as? String { text = value }
+        else if let value = value as? NSNumber { text = value.stringValue }
+        else { throw StopwatchEngineError.malformedResponse }
+        guard let number = Int64(text), number >= 0 else {
+            throw StopwatchEngineError.invalidResponse("数值不是有效的非负整数。")
         }
+        return number
     }
 
-    private func decimalFromHex(_ value: String) -> Decimal {
-        value.reduce(Decimal(0)) { partial, character in
-            let digit: Decimal
-            switch character.lowercased() {
-            case "0"..."9": digit = Decimal(character.wholeNumberValue ?? 0)
-            case "a": digit = 10
-            case "b": digit = 11
-            case "c": digit = 12
-            case "d": digit = 13
-            case "e": digit = 14
-            case "f": digit = 15
-            default: digit = 0
+    private func resourceTotal(_ first: Any?, _ second: Any?) throws -> Int64 {
+        let lhs = try nonnegativeInt64(first)
+        let rhs = try nonnegativeInt64(second)
+        let total = lhs.addingReportingOverflow(rhs)
+        guard !total.overflow else { throw StopwatchEngineError.invalidResponse("资源总量超出范围。") }
+        return total.partialValue
+    }
+
+    /// 对节点返回的整数逐位精确解析；超长或超出 Decimal 精度时拒绝显示错误金额。
+    private func exactUnsignedDecimal(_ text: String, radix: Int, maxLength: Int) throws -> Decimal {
+        guard !text.isEmpty, text.utf8.count <= maxLength else { throw StopwatchEngineError.malformedResponse }
+        var result = Decimal(0)
+        var base = Decimal(radix)
+        for byte in text.utf8 {
+            let value: UInt8
+            switch byte {
+            case 48...57: value = byte - 48
+            case 65...70 where radix == 16: value = byte - 65 + 10
+            case 97...102 where radix == 16: value = byte - 97 + 10
+            default: throw StopwatchEngineError.malformedResponse
             }
-            return partial * 16 + digit
+            var digit = Decimal(Int(value))
+            var product = Decimal()
+            var sum = Decimal()
+            guard NSDecimalMultiply(&product, &result, &base, .plain) == .noError,
+                  NSDecimalAdd(&sum, &product, &digit, .plain) == .noError else {
+                throw StopwatchEngineError.invalidResponse("金额超出可精确显示的范围。")
+            }
+            result = sum
         }
+        return result
     }
 
     private func addressHex(_ address: String) -> String? {

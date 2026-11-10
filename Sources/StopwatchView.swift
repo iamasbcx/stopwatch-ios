@@ -19,10 +19,10 @@ struct StopwatchView: View {
             VStack(spacing: 28) {
                 Spacer()
                 Image(systemName: "stopwatch.fill").font(.system(size: 56, weight: .medium)).foregroundStyle(.cyan)
-                Text("Stopwatch").font(.system(size: 32, weight: .bold, design: .rounded))
-                Text("Enter seconds and start the timer").foregroundStyle(.secondary)
+                Text("秒表").font(.system(size: 32, weight: .bold, design: .rounded))
+                Text("输入秒数后开始计时").foregroundStyle(.secondary)
                 Text(timeText).font(.system(size: 58, weight: .medium, design: .monospaced)).monospacedDigit().contentTransition(.numericText()).padding(.vertical, 18)
-                TextField("Seconds", text: $input)
+                TextField("秒数", text: $input)
                     .keyboardType(.numberPad)
                     .focused($isInputFocused)
                     .textFieldStyle(.roundedBorder)
@@ -35,12 +35,12 @@ struct StopwatchView: View {
                     }
                 if let errorMessage { Text(errorMessage).font(.footnote).foregroundStyle(.red) }
                 HStack(spacing: 12) {
-                    Button(isRunning ? "Pause" : (remaining > 0 ? "Resume" : "Start")) { startOrPause() }
+                    Button(isRunning ? "暂停" : (remaining > 0 ? "继续" : "开始")) { startOrPause() }
                         .buttonStyle(.borderedProminent).tint(.cyan)
-                    Button("Reset") { reset() }.buttonStyle(.bordered)
+                    Button("重置") { reset() }.buttonStyle(.bordered)
                 }
                 Spacer()
-                Text("Lap Timer").font(.caption).foregroundStyle(.secondary).padding(.bottom, 12)
+                Text("倒计时秒表").font(.caption).foregroundStyle(.secondary).padding(.bottom, 12)
             }
             .padding(24)
         }
@@ -71,7 +71,7 @@ struct StopwatchView: View {
             return
         }
         guard let value = Int(input), value > 0 else {
-            errorMessage = "Enter a positive whole number."
+            errorMessage = "请输入大于 0 的整数秒数。"
             return
         }
         if remaining == 0 && pausedInterval == nil && input == "5201314" {

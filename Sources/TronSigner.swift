@@ -12,13 +12,25 @@ enum TronSignerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidKey:
-            return "The key must contain 64 hexadecimal characters and stay inside the secp256k1 range."
+            return "私钥必须为 64 位十六进制字符，且处于 secp256k1 有效范围内。"
         case let .invalidAddress(address):
-            return "Invalid TRON address: \(address)."
+            return "TRON 地址无效：\(address)"
         case let .invalidAmount(message):
-            return message
+            switch message {
+            case "Amount must be greater than zero.": return "金额必须大于零。"
+            case "The amount is too large.": return "金额超出支持范围。"
+            case "The amount could not be converted.": return "金额无法转换为链上整数单位。"
+            default:
+                let prefix = "The amount exceeds the supported "
+                let suffix = " decimal places."
+                if message.hasPrefix(prefix), message.hasSuffix(suffix) {
+                    let digits = message.dropFirst(prefix.count).dropLast(suffix.count)
+                    return "金额最多支持 \(digits) 位小数。"
+                }
+                return "金额无效：\(message)"
+            }
         case .signatureFailure:
-            return "The signer produced an unusable signature; try again."
+            return "无法生成有效签名，请重试。"
         }
     }
 }

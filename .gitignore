@@ -8,6 +8,8 @@ xcuserdata/
 *.mode1v3
 *.mode2v3
 Pods/
+__pycache__/
+_杂项/验证工具/
 备份/
 
 备份/

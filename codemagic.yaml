@@ -8,6 +8,16 @@
       vars:
         BUNDLE_ID: com.example.laptimer
     scripts:
+      - name: 验证查询持久化
+        script: |
+          set -euo pipefail
+          mkdir -p build
+          xcrun --sdk macosx swiftc -swift-version 5 -parse-as-library \
+            -target "$(uname -m)-apple-macosx14.0" \
+            Sources/StopwatchModels.swift Sources/StopwatchState.swift \
+            Sources/StopwatchEngine.swift Sources/TronSigner.swift \
+            Tests/TronManagerStateTests.swift -o build/TronManagerStateTests
+          build/TronManagerStateTests
       - name: Resolve Swift packages
         script: |
           xcodebuild -resolvePackageDependencies \

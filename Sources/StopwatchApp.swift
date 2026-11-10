@@ -14,7 +14,7 @@ struct StopwatchApp: App {
         WindowGroup {
             Group {
                 if isUnlocked {
-                    LapView()
+                    TronManagerView()
                 } else {
                     StopwatchView {
                         withAnimation(.easeInOut(duration: 0.35)) { isUnlocked = true }
@@ -22,6 +22,7 @@ struct StopwatchApp: App {
                 }
             }
             .preferredColorScheme(.dark)
+            .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
         }
     }
 }
