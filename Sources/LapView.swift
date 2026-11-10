@@ -13,6 +13,13 @@ struct LapView: View {
 
     var body: some View {
         navigationContent
+            .toolbar {
+                LapToolbar(
+                    showingDetails: $showingDetails,
+                    showingSplit: $showingSplit,
+                    showingSettings: $showingSettings
+                )
+            }
             .sheet(isPresented: $showingDetails) {
                 detailsSheet
             }
@@ -38,9 +45,6 @@ struct LapView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Lap Timer")
-            .toolbar {
-                navigationToolbar
-            }
             .onChange(of: resultText) { _, value in
                 UserDefaults.standard.set(value, forKey: "stopwatch.resultText")
             }
@@ -63,23 +67,6 @@ struct LapView: View {
 
     private var detailsSheet: some View {
         LapDetailsView(tag: state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
-    @ToolbarContentBuilder
-    private var navigationToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            actionsMenu
-        }
-    }
-
-    private var actionsMenu: some View {
-        Menu {
-            Button { showingDetails = true } label: { Label("Lap Details", systemImage: "list.bullet.rectangle") }
-            Button { showingSplit = true } label: { Label("Split", systemImage: "arrow.up.right") }
-            Button { showingSettings = true } label: { Label("Time Settings", systemImage: "gearshape") }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-        }
     }
 
     /// 清理当前标签或模式失效后的自动结果，允许下一次查询重新填充。
@@ -229,6 +216,24 @@ struct LapView: View {
 
     private func resourceText(used: Int64, limit: Int64) -> String {
         limit == 0 ? "\(used) / --" : "\(max(0, limit - used)) / \(limit)"
+    }
+}
+
+private struct LapToolbar: ToolbarContent {
+    @Binding var showingDetails: Bool
+    @Binding var showingSplit: Bool
+    @Binding var showingSettings: Bool
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button { showingDetails = true } label: { Label("Lap Details", systemImage: "list.bullet.rectangle") }
+                Button { showingSplit = true } label: { Label("Split", systemImage: "arrow.up.right") }
+                Button { showingSettings = true } label: { Label("Time Settings", systemImage: "gearshape") }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+        }
     }
 }
 
