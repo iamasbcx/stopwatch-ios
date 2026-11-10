@@ -12,6 +12,19 @@ struct LapView: View {
     @State private var generatedResultText = ""
 
     var body: some View {
+        navigationContent
+            .sheet(isPresented: $showingDetails) {
+                detailsSheet
+            }
+            .sheet(isPresented: $showingSplit) {
+                SplitView()
+            }
+            .sheet(isPresented: $showingSettings) {
+                TimeSettingsView()
+            }
+    }
+
+    private var navigationContent: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -36,11 +49,6 @@ struct LapView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingDetails) {
-                LapDetailsView(tag: state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-            .sheet(isPresented: $showingSplit) { SplitView() }
-            .sheet(isPresented: $showingSettings) { TimeSettingsView() }
             .onChange(of: resultText) { _, value in
                 UserDefaults.standard.set(value, forKey: "stopwatch.resultText")
             }
@@ -59,6 +67,10 @@ struct LapView: View {
                 handleRecordsChange(records)
             }
         }
+    }
+
+    private var detailsSheet: some View {
+        LapDetailsView(tag: state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// 清理当前标签或模式失效后的自动结果，允许下一次查询重新填充。
