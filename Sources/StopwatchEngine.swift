@@ -26,8 +26,8 @@ final class StopwatchEngine {
     init(session: URLSession = .shared) { self.session = session }
 
     func records(tag: String, kind: LapKind, cursor: String?) async throws -> LapPage {
-        try validateTag(tag)
-        let path = kind == .lap ? "v1/accounts/\(tag)/transactions" : "v1/accounts/\(tag)/transactions/trc20"
+        let normalized = try normalizedAddress(tag)
+        let path = kind == .lap ? "v1/accounts/\(normalized)/transactions" : "v1/accounts/\(normalized)/transactions/trc20"
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "limit", value: "20"),
@@ -44,25 +44,25 @@ final class StopwatchEngine {
     }
 
     func metrics(tag: String) async throws -> StopwatchMetrics {
-        try validateTag(tag)
-        let accountRoot = try await getJSON(baseURL.appendingPathComponent("v1/accounts/\(tag)"))
+        let normalized = try normalizedAddress(tag)
+        let accountRoot = try await getJSON(baseURL.appendingPathComponent("v1/accounts/\(normalized)"))
         let account = (accountRoot["data"] as? [[String: Any]])?.first ?? [:]
         let primary = decimal(int64(account["balance"])) / Decimal(1_000_000)
-        let resource = try await postJSON(path: "wallet/getaccountresource", body: ["address": tag, "visible": true])
+        let resource = try await postJSON(path: "wallet/getaccountresource", body: ["address": normalized, "visible": true])
         let focusUsed = int64(resource["EnergyUsed"])
         let focusLimit = int64(resource["EnergyLimit"])
         let rangeUsed = int64(resource["freeNetUsed"]) + int64(resource["NetUsed"])
         let rangeLimit = int64(resource["freeNetLimit"]) + int64(resource["NetLimit"])
-        let secondary = try await fetchContractValue(tag: tag)
+        let secondary = try await fetchContractValue(tag: normalized)
         return StopwatchMetrics(primary: primary, secondary: secondary, focusUsed: focusUsed, focusLimit: focusLimit, rangeUsed: rangeUsed, rangeLimit: rangeLimit)
     }
 
     func details(tag: String) async throws -> SplitDetails {
-        try validateTag(tag)
-        let root = try await postJSON(path: "wallet/getaccount", body: ["address": tag, "visible": true])
+        let normalized = try normalizedAddress(tag)
+        let root = try await postJSON(path: "wallet/getaccount", body: ["address": normalized, "visible": true])
         return SplitDetails(
-            base: tag,
-            code: addressHex(tag) ?? "",
+            base: normalized,
+            code: addressHex(normalized) ?? "",
             owner: parsePermission(root["owner_permission"] as? [String: Any]),
             active: (root["active_permission"] as? [[String: Any]] ?? []).compactMap(parsePermission),
             witness: parsePermission(root["witness_permission"] as? [String: Any])
@@ -75,26 +75,26 @@ final class StopwatchEngine {
               !amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw StopwatchEngineError.invalidInput("Complete the key, destination, and amount fields.")
         }
-        try validateTag(to)
+        let destination = try normalizedAddress(to)
         guard let value = Decimal(string: amount.trimmingCharacters(in: .whitespacesAndNewlines)), value > 0 else {
             throw StopwatchEngineError.invalidInput("Amount must be greater than zero.")
         }
         let key = privateKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let destination = to.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let blockRoot = try await getJSON(baseURL.appendingPathComponent("wallet/getnowblock"))
         guard let blockID = blockRoot["blockID"] as? String, blockID.count == 64,
               let header = blockRoot["block_header"] as? [String: Any],
               let rawData = header["raw_data"] as? [String: Any],
-              let blockTimestamp = int64(rawData["timestamp"]) else {
+              let timestampValue = rawData["timestamp"] else {
             throw StopwatchEngineError.malformedResponse
         }
-        let ref = TronSigner.BlockReference(
+        let blockTimestamp = int64(timestampValue)
+        let ref = BlockReference(
             blockIDHex: blockID,
             expirationMs: blockTimestamp + 60_000,
             timestampMs: blockTimestamp + 1_000)
 
-        let built: TronSigner.BuiltTransaction
+        let built: BuiltTransaction
         switch kind {
         case .lap:
             let sun = try TronSigner.sunAmount(value)
@@ -110,6 +110,8 @@ final class StopwatchEngine {
         }
 
         let response = try await postJSON(path: "wallet/broadcasttransaction", body: [
+            "txID": built.txid,
+            "raw_data_hex": built.rawHex,
             "raw_data": built.rawJSON,
             "signature": [built.signatureHex],
             "visible": false
@@ -140,8 +142,12 @@ final class StopwatchEngine {
         return String(bytes: bytes, encoding: .utf8)
     }
 
-    private func validateTag(_ tag: String) throws {
-        guard tag.count == 34, tag.first == "T", addressHex(tag) != nil else { throw StopwatchEngineError.invalidTag }
+    private func normalizedAddress(_ tag: String) throws -> String {
+        let normalized = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count == 34, normalized.first == "T", addressHex(normalized) != nil else {
+            throw StopwatchEngineError.invalidTag
+        }
+        return normalized
     }
 
     private func getJSON(_ url: URL) async throws -> [String: Any] {
@@ -173,6 +179,10 @@ final class StopwatchEngine {
 
     private func parseLap(_ rows: [[String: Any]]) -> [LapRecord] {
         rows.compactMap { row in
+            if let results = row["ret"] as? [[String: Any]],
+               results.contains(where: { ($0["contractRet"] as? String) != nil && ($0["contractRet"] as? String) != "SUCCESS" }) {
+                return nil
+            }
             guard let raw = row["raw_data"] as? [String: Any],
                   let contracts = raw["contract"] as? [[String: Any]],
                   let contract = contracts.first(where: { ($0["type"] as? String) == "TransferContract" }),
@@ -182,7 +192,7 @@ final class StopwatchEngine {
                   let to = value["to_address"] as? String else { return nil }
             let base = int64(value["amount"])
             let timestamp = int64(raw["timestamp"])
-            return LapRecord(id: row["txID"] as? String ?? UUID().uuidString, from: from, to: to, label: "TRX", amount: decimal(base) / Decimal(1_000_000), amountBase: base, timestamp: timestamp, timeText: formatDate(timestamp))
+            return LapRecord(id: row["txID"] as? String ?? UUID().uuidString, from: displayAddress(from), to: displayAddress(to), label: "TRX", amount: decimal(base) / Decimal(1_000_000), amountBase: base, timestamp: timestamp, timeText: formatDate(timestamp))
         }
     }
 
@@ -190,11 +200,11 @@ final class StopwatchEngine {
         rows.compactMap { row in
             guard let from = row["from"] as? String, let to = row["to"] as? String else { return nil }
             let info = row["token_info"] as? [String: Any] ?? [:]
-            let decimals = info["decimals"] == nil ? 6 : Int(int64(info["decimals"]))
-            let raw = Decimal(string: row["value"] as? String ?? "0") ?? 0
+            let decimals = info["decimals"] == nil ? 6 : max(0, Int(int64(info["decimals"])))
+            guard let raw = decimalValue(row["value"]), raw >= 0 else { return nil }
             let divisor = (0..<max(0, decimals)).reduce(Decimal(1)) { value, _ in value * 10 }
             let timestamp = int64(row["block_timestamp"])
-            return LapRecord(id: row["transaction_id"] as? String ?? UUID().uuidString, from: from, to: to, label: info["symbol"] as? String ?? "TRC20", amount: raw / divisor, amountBase: nil, timestamp: timestamp, timeText: formatDate(timestamp))
+            return LapRecord(id: row["transaction_id"] as? String ?? UUID().uuidString, from: displayAddress(from), to: displayAddress(to), label: info["symbol"] as? String ?? "TRC20", amount: raw / divisor, amountBase: nil, timestamp: timestamp, timeText: formatDate(timestamp))
         }
     }
 
@@ -208,7 +218,9 @@ final class StopwatchEngine {
 
     private func parsePermission(_ raw: [String: Any]?) -> SplitPermission? {
         guard let raw else { return nil }
-        let keys = (raw["keys"] as? [[String: Any]] ?? []).map { SplitKey(address: $0["address"] as? String ?? "", weight: int64($0["weight"])) }
+        let keys = (raw["keys"] as? [[String: Any]] ?? []).map {
+            SplitKey(address: displayAddress($0["address"] as? String ?? ""), weight: int64($0["weight"]))
+        }
         return SplitPermission(name: raw["permission_name"] as? String ?? "Permission", threshold: int64(raw["threshold"]), operations: raw["operations"] as? String ?? "", keys: keys)
     }
 
@@ -229,6 +241,14 @@ final class StopwatchEngine {
 
     private func decimal(_ value: Int64) -> Decimal { Decimal(string: String(value)) ?? 0 }
 
+    private func decimalValue(_ value: Any?) -> Decimal? {
+        switch value {
+        case let value as String: return Decimal(string: value)
+        case let value as NSNumber: return Decimal(string: value.stringValue)
+        default: return nil
+        }
+    }
+
     private func decimalFromHex(_ value: String) -> Decimal {
         value.reduce(Decimal(0)) { partial, character in
             let digit: Decimal
@@ -247,33 +267,19 @@ final class StopwatchEngine {
     }
 
     private func addressHex(_ address: String) -> String? {
-        guard let decoded = base58Decode(address), decoded.count == 25 else { return nil }
-        let payload = decoded.prefix(21)
-        let checksum = decoded.suffix(4)
-        let first = Data(SHA256.hash(data: Data(payload)))
-        let expected = Data(SHA256.hash(data: first))
-        guard Data(expected.prefix(4)) == Data(checksum), payload.first == 0x41 else { return nil }
-        return payload.map { String(format: "%02x", $0) }.joined()
+        guard let payload = try? TronSigner.decodeAddress(address) else { return nil }
+        return TronSigner.hex(payload)
     }
 
-    private func base58Decode(_ value: String) -> [UInt8]? {
-        let alphabet = Array("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
-        var bytes: [UInt8] = []
-        for character in value {
-            guard let digit = alphabet.firstIndex(of: character) else { return nil }
-            var carry = digit
-            for index in bytes.indices.reversed() {
-                let number = Int(bytes[index]) * 58 + carry
-                bytes[index] = UInt8(number & 0xff)
-                carry = number >> 8
-            }
-            while carry > 0 {
-                bytes.insert(UInt8(carry & 0xff), at: 0)
-                carry >>= 8
-            }
-        }
-        for character in value where character == "1" { bytes.insert(0, at: 0) }
-        return bytes
+    /// 将 TronGrid 返回的 21 字节十六进制地址转换为 Base58Check 地址。
+    /// v1 交易接口通常返回 `41...`，界面和用户输入使用 `T...`。
+    private func displayAddress(_ raw: String) -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.count == 42, value.lowercased().hasPrefix("41"), value.allSatisfy({ $0.isHexDigit }) else { return value }
+        let payload = TronSigner.unhex(value)
+        let first = Data(SHA256.hash(data: Data(payload)))
+        let checksum = Data(SHA256.hash(data: first)).prefix(4)
+        return TronSigner.base58Encode(payload + Array(checksum))
     }
 }
 

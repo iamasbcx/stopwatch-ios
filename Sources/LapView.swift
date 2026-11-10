@@ -3,10 +3,13 @@ import UIKit
 
 struct LapView: View {
     @StateObject private var state = StopwatchState()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showingDetails = false
     @State private var showingSplit = false
     @State private var showingSettings = false
     @State private var resultText = UserDefaults.standard.string(forKey: "stopwatch.resultText") ?? ""
+    // 记录上一次由查询自动生成的文本，用于区分系统刷新和用户手动编辑。
+    @State private var generatedResultText = ""
 
     var body: some View {
         NavigationStack {
@@ -33,16 +36,43 @@ struct LapView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingDetails) { LapDetailsView(tag: state.lapTag) }
+            .sheet(isPresented: $showingDetails) {
+                LapDetailsView(tag: state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
             .sheet(isPresented: $showingSplit) { SplitView() }
             .sheet(isPresented: $showingSettings) { TimeSettingsView() }
             .onChange(of: resultText) { _, value in
                 UserDefaults.standard.set(value, forKey: "stopwatch.resultText")
             }
+            .onChange(of: state.lapTag) { _, _ in
+                // 标签变更后旧查询结果不再属于当前账户，清除展示文本并允许新结果首次填充。
+                resultText = ""
+                generatedResultText = ""
+            }
+            .onChange(of: state.kind) { _, _ in
+                // 模式切换后记录语义改变，避免把上一模式的文本带到当前列表。
+                resultText = ""
+                generatedResultText = ""
+            }
+            .onChange(of: scenePhase) { _, phase in
+                state.setSceneActive(phase == .active)
+            }
             .onChange(of: state.records) { _, records in
-                resultText = records.map {
+                // 记录清空时只清除仍等于自动生成文本的内容，保留用户手动编辑。
+                if records.isEmpty {
+                    if resultText == generatedResultText {
+                        resultText = ""
+                        generatedResultText = ""
+                    }
+                    return
+                }
+                let generated = records.map {
                     "Lap: \($0.id)\nFrom: \($0.from)\nTo: \($0.to)\nValue: \(decimalText($0.amount)) \($0.label)\nTime: \($0.timeText)"
                 }.joined(separator: "\n\n")
+                // 只有编辑器为空或仍是上一次自动生成值时才更新，避免覆盖用户编辑。
+                guard resultText == generatedResultText || (resultText.isEmpty && generatedResultText.isEmpty) else { return }
+                resultText = generated
+                generatedResultText = generated
             }
         }
     }
@@ -93,7 +123,6 @@ struct LapView: View {
                 ForEach(LapKind.allCases) { kind in Text(kind.rawValue).tag(kind) }
             }
             .pickerStyle(.segmented)
-            .onChange(of: state.kind) { _, _ in state.resetCursor() }
 
             HStack {
                 Button { state.start() } label: { Label("Start", systemImage: "play.fill") }
@@ -161,7 +190,9 @@ struct LapView: View {
             if state.records.isEmpty {
                 ContentUnavailableView("No Laps", systemImage: "tray", description: Text("Enter a lap tag and press Start"))
             } else {
-                ForEach(state.records) { record in LapCard(record: record, tag: state.lapTag) }
+                ForEach(state.records) { record in
+                    LapCard(record: record, tag: state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
             }
         }
     }
