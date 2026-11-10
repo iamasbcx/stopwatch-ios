@@ -29,7 +29,10 @@
         script: |
           rm -rf build/Payload build/StopwatchIOS.ipa
           mkdir -p build/Payload
-          cp -R build/StopwatchIOS.xcarchive/Products/Applications/LapTimer.app build/Payload/LapTimer.app
+          APP_PATH=build/StopwatchIOS.xcarchive/Products/Applications/LapTimer.app
+          test -x "$APP_PATH/LapTimer"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Info.plist"
+          cp -R "$APP_PATH" build/Payload/LapTimer.app
           cd build
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload StopwatchIOS.ipa
     artifacts:
