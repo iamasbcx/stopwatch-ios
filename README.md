@@ -30,7 +30,7 @@ iOS 17 及以上版本的 SwiftUI 应用。首屏是中文倒计时秒表，输�
 
 ## Codemagic 与 LiveContainer
 
-仓库的 `codemagic.yaml` 先运行独立的查询状态持久化回归，再使用 Xcode 构建未签名归档并打包：
+仓库的 `codemagic.yaml` 先运行真实 Swift 地址/私钥转换回归（`-Onone` 与 `-O`）、模拟节点响应的 TRX 查询回归和状态持久化回归，再使用 Xcode 构建未签名归档并打包：
 
 - `build/StopwatchIOS.ipa`：内部为 `Payload/LapTimer.app`，供 LiveContainer 导入。
 - `build/StopwatchIOS.xcarchive`：保留完整归档。
@@ -46,6 +46,10 @@ iOS 17 及以上版本的 SwiftUI 应用。首屏是中文倒计时秒表，输�
 - `Sources/TronSigner.swift`：纯 Swift secp256k1、Keccak、Base58Check 和交易编码。
 - `Sources/LapDetailsView.swift`、`SplitView.swift`、`TimeSettingsView.swift`：权限、转账、私钥转地址。
 - `Tests/TronManagerStateTests.swift`：在独立存储域测试重建状态后的恢复、地址/模式切换清空及解锁码隔离；不访问网络、不广播交易。
-- `Tools/mirror_swift_tron_signer.py`：签名算法镜像测试；通过不代表 SwiftUI 编译或实机转账已验证。
+- `Tests/TronSignerRuntimeTests.swift`：直接执行正式 Swift 实现，验证 UInt64 构造、Base58 除法/地址编码、公开私钥转换、签名向量及非法输入；无需真实私钥。
+- `Tests/TronQueryRuntimeTests.swift`：以 `URLProtocol` 固定响应执行 `StopwatchEngine.records`，覆盖 TRX 十六进制地址转换、TRC20 和 HTTP 错误；不访问真实节点。
+- `Tools/mirror_swift_tron_signer.py`：Python 算法参考测试，不能替代真实 Swift 执行。它曾因自行归一化小整数而漏掉 Swift 的构造缺陷；通过不代表 SwiftUI 编译或实机验证通过。
+
+已修复查询 TRX 与私钥转地址共用的 Base58 越界问题：`TronBigInt(u64:)` 现在统一清除高位零，避免将 `58` 错误表示为 `[58, 0]` 后导致除法余数越界。此修复的实际 Swift 回归由 Codemagic 执行；Windows 本地验证范围仍仅为语法检查和参考算法复现。
 
 建议在新 IPA 中核验：`5201314` 进入中文管理器；输入地址查询 TRX/TRC20；修改结果后刷新不丢失；关闭重开后地址与文本恢复；复制及导出中文文本；监控前后台切换；权限/转账/转换入口均可打开。本文未声称本次进行了主网真实转账。

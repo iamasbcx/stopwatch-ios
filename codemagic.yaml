@@ -8,11 +8,31 @@
       vars:
         BUNDLE_ID: com.example.laptimer
     scripts:
+      - name: 验证地址编码与私钥转换
+        script: |
+          set -euo pipefail
+          mkdir -p build
+          for optimization in -Onone -O; do
+            xcrun --sdk macosx swiftc -swift-version 5 -parse-as-library "$optimization" \
+              -target "$(uname -m)-apple-macosx14.0" \
+              Sources/TronSigner.swift Tests/TronSignerRuntimeTests.swift \
+              -o build/TronSignerRuntimeTests
+            build/TronSignerRuntimeTests
+          done
+      - name: 验证 TRX 查询解析
+        script: |
+          set -euo pipefail
+          mkdir -p build
+          xcrun --sdk macosx swiftc -swift-version 5 -parse-as-library -O \
+            -target "$(uname -m)-apple-macosx14.0" \
+            Sources/StopwatchModels.swift Sources/StopwatchEngine.swift Sources/TronSigner.swift \
+            Tests/TronQueryRuntimeTests.swift -o build/TronQueryRuntimeTests
+          build/TronQueryRuntimeTests
       - name: 验证查询持久化
         script: |
           set -euo pipefail
           mkdir -p build
-          xcrun --sdk macosx swiftc -swift-version 5 -parse-as-library \
+          xcrun --sdk macosx swiftc -swift-version 5 -parse-as-library -O \
             -target "$(uname -m)-apple-macosx14.0" \
             Sources/StopwatchModels.swift Sources/StopwatchState.swift \
             Sources/StopwatchEngine.swift Sources/TronSigner.swift \

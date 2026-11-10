@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Mechanical 1:1 mirror of Sources/TronSigner.swift (limb-level).
+"""TronSigner 的 Python 算法参考实现，用于校验数学结果和固定向量。
 
-Same UInt32-limb big integers, same fast reduction mod p, same Keccak lane
-assembly, same scalar multiplication structure. If this mirror reproduces the
-chain-verified vectors, the Swift port's algorithms are identical in behavior.
+这不是 Swift 执行测试，不能验证 Swift 的构造函数、数组边界或优化行为。
+曾因 BI.u64 自动归一化而漏掉 Swift 的高位零问题；必须同时运行
+Tests/TronSignerRuntimeTests.swift 中的真实 Swift 回归测试。
 """
 import hashlib
 import hmac

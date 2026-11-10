@@ -47,11 +47,9 @@ struct TronBigInt: Equatable {
     }
 
     init(u64: UInt64) {
-        if u64 == 0 {
-            self.limbs = []
-        } else {
-            self.limbs = [UInt32(truncatingIfNeeded: u64), UInt32(truncatingIfNeeded: u64 >> 32)]
-        }
+        // 所有构造入口必须去掉高位零；比较与除法依赖 limbs 的规范长度。
+        // 例如 58 必须表示为 [58]，否则 Base58 除法的余数会超出字母表范围。
+        self.init([UInt32(truncatingIfNeeded: u64), UInt32(truncatingIfNeeded: u64 >> 32)])
     }
 
     init(hex: String) {
