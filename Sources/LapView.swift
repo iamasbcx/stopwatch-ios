@@ -36,7 +36,10 @@ struct LapView: View {
             .sheet(isPresented: $showingDetails) { LapDetailsView(tag: state.lapTag) }
             .sheet(isPresented: $showingSplit) { SplitView() }
             .sheet(isPresented: $showingSettings) { TimeSettingsView() }
-            .onChange(of: resultText) { _, value in\n                UserDefaults.standard.set(value, forKey: "stopwatch.resultText")\n            }\n            .onChange(of: state.records) { _, records in
+            .onChange(of: resultText) { _, value in
+                UserDefaults.standard.set(value, forKey: "stopwatch.resultText")
+            }
+            .onChange(of: state.records) { _, records in
                 resultText = records.map {
                     "Lap: \($0.id)\nFrom: \($0.from)\nTo: \($0.to)\nValue: \(decimalText($0.amount)) \($0.label)\nTime: \($0.timeText)"
                 }.joined(separator: "\n\n")
@@ -104,25 +107,12 @@ struct LapView: View {
                     .toggleStyle(.switch)
                     .font(.subheadline)
             }
-            if state.isLoading { ProgressView("Updating lap…").frame(maxWidth: .infinity, alignment: .leading) }
-            if let message = state.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
-        }
-    }
-
-    private var recordSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Lap History").font(.headline)
-                Spacer()
-                if !state.records.isEmpty {
-                    ShareLink(item: exportText) { Image(systemName: "square.and.arrow.up") }
-                    Button { UIPasteboard.general.string = exportText } label: { Image(systemName: "doc.on.doc") }
-                }
+            if state.isLoading {
+                ProgressView("Updating lap…")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if state.records.isEmpty {
-                ContentUnavailableView("No Laps", systemImage: "tray", description: Text("Enter a lap tag and press Start"))
-            } else {
-                ForEach(state.records) { record in LapCard(record: record, tag: state.lapTag) }
+            if let message = state.message {
+                Text(message).font(.footnote).foregroundStyle(.secondary)
             }
         }
     }
@@ -158,8 +148,22 @@ struct LapView: View {
         }
     }
 
-    private var exportText: String {
-        state.records.map { "Lap: \($0.id)\nFrom: \($0.from)\nTo: \($0.to)\nValue: \(decimalText($0.amount)) \($0.label)\nTime: \($0.timeText)" }.joined(separator: "\n\n")
+    private var recordSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Lap History").font(.headline)
+                Spacer()
+                if !state.records.isEmpty {
+                    ShareLink(item: resultText) { Image(systemName: "square.and.arrow.up") }
+                    Button { UIPasteboard.general.string = resultText } label: { Image(systemName: "doc.on.doc") }
+                }
+            }
+            if state.records.isEmpty {
+                ContentUnavailableView("No Laps", systemImage: "tray", description: Text("Enter a lap tag and press Start"))
+            } else {
+                ForEach(state.records) { record in LapCard(record: record, tag: state.lapTag) }
+            }
+        }
     }
 
     private func resourceText(used: Int64, limit: Int64) -> String {
@@ -216,4 +220,3 @@ private func decimalText(_ value: Decimal) -> String {
     formatter.maximumFractionDigits = 6
     return formatter.string(from: value as NSDecimalNumber) ?? "0"
 }
-
