@@ -48,11 +48,11 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		E10000010000000000000001 /* LapTimer */ = {isa = PBXNativeTarget; buildConfigurationList = F10000010000000000000002 /* Build configuration list for PBXNativeTarget "LapTimer" */; buildPhases = (C10000010000000000000002 /* Sources */, C10000010000000000000003 /* Resources */, C10000010000000000000001 /* Frameworks */,); buildRules = (); dependencies = (); name = LapTimer; productName = LapTimer; productReference = B10000010000000000000000 /* LapTimer.app */; productType = "com.apple.product-type.application"; };
+		E10000010000000000000001 /* LapTimer */ = {isa = PBXNativeTarget; buildConfigurationList = F10000010000000000000006 /* Build configuration list for PBXNativeTarget "LapTimer" */; buildPhases = (C10000010000000000000002 /* Sources */, C10000010000000000000003 /* Resources */, C10000010000000000000001 /* Frameworks */,); buildRules = (); dependencies = (); name = LapTimer; productName = LapTimer; productReference = B10000010000000000000000 /* LapTimer.app */; productType = "com.apple.product-type.application"; };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		E10000010000000000000000 /* Project object */ = {isa = PBXProject; attributes = { LastSwiftUpdateCheck = 1600; ORGANIZATIONNAME = Stopwatch; TargetAttributes = { E10000010000000000000001 = { CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = F10000010000000000000001 /* Build configuration list for PBXProject "LapTimer" */; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = D10000010000000000000000; productRefGroup = D10000010000000000000003 /* Products */; projectDirPath = ""; projectRoot = ""; targets = (E10000010000000000000001 /* LapTimer */,); };
+		E10000010000000000000000 /* Project object */ = {isa = PBXProject; attributes = { LastSwiftUpdateCheck = 1600; ORGANIZATIONNAME = Stopwatch; TargetAttributes = { E10000010000000000000001 = { CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = F10000010000000000000005 /* Build configuration list for PBXProject "LapTimer" */; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = D10000010000000000000000; productRefGroup = D10000010000000000000003 /* Products */; projectDirPath = ""; projectRoot = ""; targets = (E10000010000000000000001 /* LapTimer */,); };
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
@@ -71,8 +71,8 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		F10000010000000000000001 /* Build configuration list for PBXProject "LapTimer" */ = {isa = XCConfigurationList; buildConfigurations = (F10000010000000000000003 /* Debug project */, F10000010000000000000004 /* Release project */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-		F10000010000000000000002 /* Build configuration list for PBXNativeTarget "LapTimer" */ = {isa = XCConfigurationList; buildConfigurations = (F10000010000000000000001 /* Debug */, F10000010000000000000002 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		F10000010000000000000005 /* Build configuration list for PBXProject "LapTimer" */ = {isa = XCConfigurationList; buildConfigurations = (F10000010000000000000003 /* Debug project */, F10000010000000000000004 /* Release project */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		F10000010000000000000006 /* Build configuration list for PBXNativeTarget "LapTimer" */ = {isa = XCConfigurationList; buildConfigurations = (F10000010000000000000001 /* Debug */, F10000010000000000000002 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 	};
 	rootObject = E10000010000000000000000 /* Project object */;
