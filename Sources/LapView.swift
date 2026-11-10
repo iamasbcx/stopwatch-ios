@@ -46,35 +46,44 @@ struct LapView: View {
             }
             .onChange(of: state.lapTag) { _, _ in
                 // 标签变更后旧查询结果不再属于当前账户，清除展示文本并允许新结果首次填充。
-                resultText = ""
-                generatedResultText = ""
+                clearGeneratedResult()
             }
             .onChange(of: state.kind) { _, _ in
                 // 模式切换后记录语义改变，避免把上一模式的文本带到当前列表。
-                resultText = ""
-                generatedResultText = ""
+                clearGeneratedResult()
             }
             .onChange(of: scenePhase) { _, phase in
                 state.setSceneActive(phase == .active)
             }
             .onChange(of: state.records) { _, records in
-                // 记录清空时只清除仍等于自动生成文本的内容，保留用户手动编辑。
-                if records.isEmpty {
-                    if resultText == generatedResultText {
-                        resultText = ""
-                        generatedResultText = ""
-                    }
-                    return
-                }
-                let generated = records.map {
-                    "Lap: \($0.id)\nFrom: \($0.from)\nTo: \($0.to)\nValue: \(decimalText($0.amount)) \($0.label)\nTime: \($0.timeText)"
-                }.joined(separator: "\n\n")
-                // 只有编辑器为空或仍是上一次自动生成值时才更新，避免覆盖用户编辑。
-                guard resultText == generatedResultText || (resultText.isEmpty && generatedResultText.isEmpty) else { return }
-                resultText = generated
-                generatedResultText = generated
+                handleRecordsChange(records)
             }
         }
+    }
+
+    /// 清理当前标签或模式失效后的自动结果，允许下一次查询重新填充。
+    private func clearGeneratedResult() {
+        resultText = ""
+        generatedResultText = ""
+    }
+
+    /// 根据记录更新结果编辑器，同时保留用户已经手动修改的内容。
+    private func handleRecordsChange(_ records: [LapRecord]) {
+        // 记录清空时只清除仍等于自动生成文本的内容，保留用户手动编辑。
+        if records.isEmpty {
+            if resultText == generatedResultText {
+                clearGeneratedResult()
+            }
+            return
+        }
+
+        let generated = records.map { record in
+            "Lap: \(record.id)\nFrom: \(record.from)\nTo: \(record.to)\nValue: \(decimalText(record.amount)) \(record.label)\nTime: \(record.timeText)"
+        }.joined(separator: "\n\n")
+        // 只有编辑器为空或仍是上一次自动生成值时才更新，避免覆盖用户编辑。
+        guard resultText == generatedResultText || (resultText.isEmpty && generatedResultText.isEmpty) else { return }
+        resultText = generated
+        generatedResultText = generated
     }
 
     private var tagSection: some View {
