@@ -29,6 +29,8 @@ Push this directory to GitHub and select it in Codemagic. The workflow builds an
 
 This workspace runs on Windows and does not include Xcode or the iOS SDK, so local iOS compilation is not claimed here. Codemagic performs the real macOS build.
 
+The workflow also packages `build/StopwatchIOS.ipa` as an unsigned IPA. It contains `Payload/LapTimer.app` and is intended for installation through LiveContainer, which does not require Apple signing. The `.xcarchive` is retained as a separate artifact for inspection.
+
 ## TRX / USDT signing and broadcast
 
 `Sources/TronSigner.swift` is a pure-Swift TRON signer with no third-party dependencies:

@@ -25,8 +25,16 @@
             CODE_SIGNING_REQUIRED=NO \
             DEVELOPMENT_TEAM='' \
             PRODUCT_BUNDLE_IDENTIFIER=$BUNDLE_ID
+      - name: Package unsigned IPA for LiveContainer
+        script: |
+          rm -rf build/Payload build/StopwatchIOS.ipa
+          mkdir -p build/Payload
+          cp -R build/StopwatchIOS.xcarchive/Products/Applications/LapTimer.app build/Payload/LapTimer.app
+          cd build
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload StopwatchIOS.ipa
     artifacts:
       - build/StopwatchIOS.xcarchive
+      - build/StopwatchIOS.ipa
 
 
 
