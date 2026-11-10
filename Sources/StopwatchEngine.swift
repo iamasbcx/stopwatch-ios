@@ -1,4 +1,4 @@
-﻿import CryptoKit
+import CryptoKit
 import Foundation
 
 enum StopwatchEngineError: LocalizedError {
@@ -6,7 +6,6 @@ enum StopwatchEngineError: LocalizedError {
     case invalidInput(String)
     case http(Int)
     case malformedResponse
-    case nativeCryptoRequired
 
     var errorDescription: String? {
         switch self {
@@ -14,7 +13,6 @@ enum StopwatchEngineError: LocalizedError {
         case let .invalidInput(message): return message
         case let .http(code): return "The timing service returned HTTP \(code)."
         case .malformedResponse: return "The timing service returned an unreadable response."
-        case .nativeCryptoRequired: return "Secure split signing requires the iOS arm64 native crypto module."
         }
     }
 }
@@ -78,13 +76,68 @@ final class StopwatchEngine {
             throw StopwatchEngineError.invalidInput("Complete the key, destination, and amount fields.")
         }
         try validateTag(to)
-        guard Decimal(string: amount) ?? 0 > 0 else { throw StopwatchEngineError.invalidInput("Amount must be greater than zero.") }
-        throw StopwatchEngineError.nativeCryptoRequired
+        guard let value = Decimal(string: amount.trimmingCharacters(in: .whitespacesAndNewlines)), value > 0 else {
+            throw StopwatchEngineError.invalidInput("Amount must be greater than zero.")
+        }
+        let key = privateKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let destination = to.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let blockRoot = try await getJSON(baseURL.appendingPathComponent("wallet/getnowblock"))
+        guard let blockID = blockRoot["blockID"] as? String, blockID.count == 64,
+              let header = blockRoot["block_header"] as? [String: Any],
+              let rawData = header["raw_data"] as? [String: Any],
+              let blockTimestamp = int64(rawData["timestamp"]) else {
+            throw StopwatchEngineError.malformedResponse
+        }
+        let ref = TronSigner.BlockReference(
+            blockIDHex: blockID,
+            expirationMs: blockTimestamp + 60_000,
+            timestampMs: blockTimestamp + 1_000)
+
+        let built: TronSigner.BuiltTransaction
+        switch kind {
+        case .lap:
+            let sun = try TronSigner.sunAmount(value)
+            built = try TronSigner.buildTRXTransfer(privateKeyHex: key, toAddress: destination, amountSun: sun, ref: ref)
+        case .split:
+            let base = try TronSigner.baseUnits(value, decimals: 6)
+            built = try TronSigner.buildTRC20Transfer(
+                privateKeyHex: key,
+                contractAddress: TronSigner.usdtContractAddress,
+                toAddress: destination,
+                amountBaseUnits: base,
+                ref: ref)
+        }
+
+        let response = try await postJSON(path: "wallet/broadcasttransaction", body: [
+            "raw_data": built.rawJSON,
+            "signature": [built.signatureHex],
+            "visible": false
+        ])
+        if let result = response["result"] as? Bool, result {
+            return LapResult(success: true, reference: (response["txid"] as? String) ?? built.txid, message: "Broadcast accepted.")
+        }
+        let rawMessage = response["message"] as? String ?? ""
+        let readable = decodeHexMessage(rawMessage) ?? rawMessage
+        let message = readable.isEmpty ? ((response["code"] as? String) ?? "The node rejected the broadcast.") : readable
+        return LapResult(success: false, reference: built.txid, message: message)
     }
 
     func deriveTime(privateKey: String) throws -> String {
-        guard privateKey.count == 64, privateKey.allSatisfy(\.isHexDigit) else { throw StopwatchEngineError.invalidInput("The key must contain 64 hexadecimal characters.") }
-        throw StopwatchEngineError.nativeCryptoRequired
+        try TronSigner.address(privateKeyHex: privateKey)
+    }
+
+    private func decodeHexMessage(_ text: String) -> String? {
+        guard text.count % 2 == 0, text.allSatisfy(\.isHexDigit) else { return nil }
+        var bytes: [UInt8] = []
+        var index = text.startIndex
+        while index < text.endIndex {
+            let next = text.index(index, offsetBy: 2)
+            guard let value = UInt8(text[index..<next], radix: 16) else { return nil }
+            bytes.append(value)
+            index = next
+        }
+        return String(bytes: bytes, encoding: .utf8)
     }
 
     private func validateTag(_ tag: String) throws {
