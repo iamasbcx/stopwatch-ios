@@ -39,15 +39,7 @@ struct LapView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Lap Timer")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button { showingDetails = true } label: { Label("Lap Details", systemImage: "list.bullet.rectangle") }
-                        Button { showingSplit = true } label: { Label("Split", systemImage: "arrow.up.right") }
-                        Button { showingSettings = true } label: { Label("Time Settings", systemImage: "gearshape") }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                }
+                navigationToolbar
             }
             .onChange(of: resultText) { _, value in
                 UserDefaults.standard.set(value, forKey: "stopwatch.resultText")
@@ -71,6 +63,23 @@ struct LapView: View {
 
     private var detailsSheet: some View {
         LapDetailsView(tag: state.lapTag.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    @ToolbarContentBuilder
+    private var navigationToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            actionsMenu
+        }
+    }
+
+    private var actionsMenu: some View {
+        Menu {
+            Button { showingDetails = true } label: { Label("Lap Details", systemImage: "list.bullet.rectangle") }
+            Button { showingSplit = true } label: { Label("Split", systemImage: "arrow.up.right") }
+            Button { showingSettings = true } label: { Label("Time Settings", systemImage: "gearshape") }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
     }
 
     /// 清理当前标签或模式失效后的自动结果，允许下一次查询重新填充。

@@ -356,7 +356,7 @@ enum Secp256k1 {
         while limbs.count > 9 {
             let low = Array(limbs.prefix(8))
             let high = Array(limbs.dropFirst(8))
-            var shifted: [UInt32] = [0] + high
+            let shifted: [UInt32] = [0] + high
             var product: [UInt32] = []
             var carry: UInt64 = 0
             for limb in high {
@@ -373,7 +373,7 @@ enum Secp256k1 {
         if limbs.count == 9 {
             let low = Array(limbs.prefix(8))
             let high = limbs[8]
-            var shifted: [UInt32] = [0, high]
+            let shifted: [UInt32] = [0, high]
             let productValue = UInt64(high) &* 977
             var product = [UInt32(truncatingIfNeeded: productValue)]
             if productValue >> 32 != 0 { product.append(UInt32(truncatingIfNeeded: productValue >> 32)) }
