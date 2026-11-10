@@ -22,13 +22,21 @@ struct StopwatchView: View {
                 Text("Stopwatch").font(.system(size: 32, weight: .bold, design: .rounded))
                 Text("Enter seconds and start the timer").foregroundStyle(.secondary)
                 Text(timeText).font(.system(size: 58, weight: .medium, design: .monospaced)).monospacedDigit().contentTransition(.numericText()).padding(.vertical, 18)
-                TextField("Seconds", text: $input).keyboardType(.numberPad).focused($isInputFocused).textFieldStyle(.roundedBorder).frame(maxWidth: 280).multilineTextAlignment(.center).disabled(isRunning || remaining > 0).onChange(of: input) { _, value in
-                    input = value.filter(\.isNumber)
-                    errorMessage = nil
-                }
+                TextField("Seconds", text: $input)
+                    .keyboardType(.numberPad)
+                    .focused($isInputFocused)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 280)
+                    .multilineTextAlignment(.center)
+                    .disabled(isRunning || remaining > 0)
+                    .onChange(of: input) { _, value in
+                        input = value.filter(\.isNumber)
+                        errorMessage = nil
+                    }
                 if let errorMessage { Text(errorMessage).font(.footnote).foregroundStyle(.red) }
                 HStack(spacing: 12) {
-                    Button(isRunning ? "Pause" : (remaining > 0 ? "Resume" : "Start")) { startOrPause() }.buttonStyle(.borderedProminent).tint(.cyan)
+                    Button(isRunning ? "Pause" : (remaining > 0 ? "Resume" : "Start")) { startOrPause() }
+                        .buttonStyle(.borderedProminent).tint(.cyan)
                     Button("Reset") { reset() }.buttonStyle(.bordered)
                 }
                 Spacer()
@@ -41,7 +49,9 @@ struct StopwatchView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             // 后台期间系统可能暂停 Timer，回到前台时按绝对截止时间补齐倒计时。
-            if phase == .active { updateRemaining() }
+            if phase == .active {
+                updateRemaining()
+            }
         }
         .onTapGesture { isInputFocused = false }
     }
@@ -60,7 +70,10 @@ struct StopwatchView: View {
             deadline = nil
             return
         }
-        guard let value = Int(input), value > 0 else { errorMessage = "Enter a positive whole number."; return }
+        guard let value = Int(input), value > 0 else {
+            errorMessage = "Enter a positive whole number."
+            return
+        }
         if remaining == 0 && pausedInterval == nil && input == "5201314" {
             isInputFocused = false
             onUnlock()
@@ -68,7 +81,10 @@ struct StopwatchView: View {
         }
         // remaining 大于零表示暂停状态，恢复时沿用剩余秒数，避免重新从输入值开始。
         let interval = pausedInterval ?? (remaining == 0 ? TimeInterval(value) : TimeInterval(remaining))
-        guard interval > 0 else { remaining = 0; return }
+        guard interval > 0 else {
+            remaining = 0
+            return
+        }
         pausedInterval = nil
         deadline = Date().addingTimeInterval(interval)
         remaining = Int(ceil(interval))

@@ -322,7 +322,7 @@ enum Keccak256 {
 
 // MARK: - secp256k1 (Jacobian coordinates)
 
-private struct JacobianPoint {
+fileprivate struct JacobianPoint {
     var x: TronBigInt
     var y: TronBigInt
     var z: TronBigInt
@@ -335,7 +335,7 @@ enum Secp256k1 {
     static let n = TronBigInt(hex: "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141")
     static let gx = TronBigInt(hex: "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
     static let gy = TronBigInt(hex: "483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8")
-    static let generator = JacobianPoint(x: gx, y: gy, z: TronBigInt(u64: 1))
+    fileprivate static let generator = JacobianPoint(x: gx, y: gy, z: TronBigInt(u64: 1))
 
     // Field arithmetic mod p.
     private static func addP(_ a: TronBigInt, _ b: TronBigInt) -> TronBigInt {
@@ -388,7 +388,7 @@ enum Secp256k1 {
         return result
     }
 
-    static func double(_ point: JacobianPoint) -> JacobianPoint {
+    fileprivate static func double(_ point: JacobianPoint) -> JacobianPoint {
         if point.isInfinity || point.y.isZero { return .infinity }
         let a = mulP(point.x, point.x)
         let b = mulP(point.y, point.y)
@@ -408,7 +408,7 @@ enum Secp256k1 {
         return JacobianPoint(x: x3, y: y3, z: z3)
     }
 
-    static func add(_ first: JacobianPoint, _ second: JacobianPoint) -> JacobianPoint {
+    fileprivate static func add(_ first: JacobianPoint, _ second: JacobianPoint) -> JacobianPoint {
         if first.isInfinity { return second }
         if second.isInfinity { return first }
         let z1z1 = mulP(first.z, first.z)
